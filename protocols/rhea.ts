@@ -4,7 +4,9 @@ import { months } from "../utils/time";
 import { queryDuneSQLCached } from "../utils/dune";
 
 const start = 1753833600; // 2025-07-30
+const communityIncentivesStart = 1758499200 // 2025-09-22
 const total = 1_000_000_000;
+const tgeAirdrop = 20_667_005
 const shares = {
     team: total * 0.118,
     conversion: total * 0.37,
@@ -27,7 +29,7 @@ function queryConversions() {
     `, start, { protocolSlug: "rhea-finance", allocation: "REF/BRRR Conversion"});
 }
 
-function queryAirdrops() {
+function queryCommunityIncentives() {
     return queryDuneSQLCached(`
     with incentives as (
         select block_date, delta_amount
@@ -52,7 +54,7 @@ function queryAirdrops() {
         *
     from airdrops
     order by 1 desc
-`, start, { protocolSlug: "rhea-finance", allocation: "Airdrops"});
+`, communityIncentivesStart, { protocolSlug: "rhea-finance", allocation: "Community Incentives"});
 }
 
 function queryOrheaConversions() {
@@ -79,30 +81,32 @@ function queryOrheaConversions() {
         *
     from orhea_to_rhea
     order by 1 desc
-`, 1770681600,  { protocolSlug: "rhea-finance", allocation: "Incentives"});
+`, 1770681600,  { protocolSlug: "rhea-finance", allocation: "oRHEA Incentives"});
 }
 
-const airdropSection: SectionV2 = {
-    displayName: "Airdrops",
-    methodology: "RHEA token airdrops distributed on NEAR via airdrop.rhealab.near and ref-airdrop.near, tracked on-chain via Dune",
+const communitySection: SectionV2 = {
+    displayName: "Community Incentives",
+    methodology: "RHEA tokens distributed on NEAR via airdrop.rhealab.near and ref-airdrop.near, tracked on-chain via Dune",
+    isIncentive: true,
     components: [
         {
-            id: "airdrops",
-            name: "Airdrops",
+            id: "community-incentives",
+            name: "Community Incentives",
+            isIncentive: true,
             methodology: "Tracks RHEA token transfers from airdrop accounts (airdrop.rhealab.near, ref-airdrop.near)",
-            fetch: queryAirdrops,
+            fetch: queryCommunityIncentives,
         },
     ],
 };
 
 const incentivesSection: SectionV2 = {
-    displayName: "Incentives",
+    displayName: "oRHEA Incentives",
     methodology: "oRHEA to RHEA conversions tracked on-chain via Dune. oRHEA is a reputation-weighted incentive token earned through ecosystem participation, convertible to RHEA.",
     isIncentive: true,
     components: [
         {
             id: "orhea-conversions",
-            name: "Incentives",
+            name: "oRHEA Incentives",
             methodology: "Tracks RHEA outflows from orhea-conv.rhealab.near, representing oRHEA-to-RHEA conversions by ecosystem participants",
             isIncentive: true,
             fetch: queryOrheaConversions,
@@ -155,9 +159,9 @@ const remainingAirdropIncentivesSection: SectionV2 = {
             methodology: "30.6% total allocation minus on-chain tracked airdrops and oRHEA conversions",
             isTBD: true,
             fetch: async () => {
-                const [airdropData, orheaData] = await Promise.all([queryAirdrops(), queryOrheaConversions()]);
+                const [airdropData, orheaData] = await Promise.all([queryCommunityIncentives(), queryOrheaConversions()]);
                 const totalDistributed = [...airdropData, ...orheaData].reduce((sum, d) => sum + d.amount, 0);
-                const remaining = shares.airdropIncentives - totalDistributed;
+                const remaining = shares.airdropIncentives - (totalDistributed + tgeAirdrop);
                 if (remaining <= 0) return [];
                 return [manualCliff(start, remaining)];
             },
@@ -170,8 +174,9 @@ const rhea: ProtocolV2 = {
     "Remaining REF/BRRR Conversion": remainingConversionSection,
     "Token Operation Treasury": manualCliff(start, shares.treasury),
     "Liquidity Provision": manualCliff(start, shares.liquidity),
-    "Airdrops": airdropSection,
-    "Incentives": incentivesSection,
+    "TGE Airdrop": manualCliff(start, tgeAirdrop),
+    "Community Incentives": communitySection,
+    "oRHEA Incentives": incentivesSection,
     "Remaining Airdrop & Incentives": remainingAirdropIncentivesSection,
     "Marketing": [manualCliff(start, shares.marketing / 2), manualCliff(months(start, 3), shares.marketing / 4), manualCliff(months(start, 6), shares.marketing / 4)],
     "Team & Advisors": manualLinear(months(start, 6), months(start, 36), shares.team),
@@ -191,8 +196,8 @@ const rhea: ProtocolV2 = {
     },
     categories: {
         liquidity: ["Liquidity Provision"],
-        airdrop: ["Airdrop", "REF/BRRR Conversion", "Remaining REF/BRRR Conversion"],
-        farming: ["Incentives", "Remaining Airdrop & Incentives"],
+        airdrop: ["TGE Airdrop", "REF/BRRR Conversion", "Remaining REF/BRRR Conversion"],
+        farming: ["oRHEA Incentives", "Remaining Airdrop & Incentives", "Community Incentives"],
         insiders: ["Team & Advisors", "Marketing"],
         noncirculating: ["Token Operation Treasury"],
     },
