@@ -1,5 +1,4 @@
 import { manualCliff, manualLinear } from "../adapters/manual";
-import { supply } from "../adapters/supply";
 import { CliffAdapterResult, ProtocolV2, SectionV2 } from "../types/adapters";
 import { queryCustom } from "../utils/queries";
 import { periodToSeconds, readableToSeconds } from "../utils/time";
@@ -7,81 +6,130 @@ import { periodToSeconds, readableToSeconds } from "../utils/time";
 const deployTime = 1621292400;
 const chain: any = "ethereum";
 const CVX: string = "0x4e3fbd56cd56c3e72c1403e103b45db9da5b9d2b";
+const DEPLOYER = "0x947b7742c403f20e5faccdac5e092c943e7d0277";
 const TREASURY_ADDRESS = "0x1389388d01708118b497f59521f6943be2541bb7";
-const EXCLUDED_TO_ADDRESS = "0x5f465e9fcffc217c5849906216581a657cd60605";
-const REWARD_CONTRACT = "0x449f2fd99174e1785cf2a1c79e665fec3dd1ddc6";
+const MASTERCHEF = "0x5f465e9fcffc217c5849906216581a657cd60605";
+const CHEF_REWARD_HOOK = "0x973c2f122dbfa2867e6f7a05d329414bff43eaea";
+const CVX_DISTRIBUTION = "0x449f2fd99174e1785cf2a1c79e665fec3dd1ddc6";
 const REWARD_PAID_TOPIC = "0xe2403640ba68fed3a2f88b7557551d1993f84b99bb10ff833f0cf8db0c5e0486";
 const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+const ZERO_TOPIC = "0x0000000000000000000000000000000000000000000000000000000000000000";
+const DEPLOYER_TOPIC = `0x000000000000000000000000${DEPLOYER.substring(2).toLowerCase()}`;
+const TREASURY_TOPIC = `0x000000000000000000000000${TREASURY_ADDRESS.substring(2).toLowerCase()}`;
+const MASTERCHEF_FROM_TOPIC = `0x000000000000000000000000${MASTERCHEF.substring(2)}`;
+const CHEF_HOOK_TOPIC = `0x000000000000000000000000${CHEF_REWARD_HOOK.substring(2)}`;
 
-const stakingRewards = async (): Promise<CliffAdapterResult[]> => {
-  const result: CliffAdapterResult[] = [];
-
-  const rewardPaidSql = `
-    SELECT
-      toStartOfDay(timestamp) AS date,
-      SUM(reinterpretAsUInt256(reverse(unhex(substring(data, 3))))) / 1e18 AS amount
-    FROM evm_indexer.logs
-    PREWHERE short_address = '${REWARD_CONTRACT.slice(0, 10)}' AND short_topic0 = '${REWARD_PAID_TOPIC.slice(0, 10)}'
-    WHERE address = {rewardContract:String}
-      AND topic0 = {rewardTopic:String}
-      AND topic1 != {treasuryTopic:String}
-      AND timestamp >= toDateTime({startDate:String})
-    GROUP BY date
-    ORDER BY date ASC
-  `;
-
-  const data = await queryCustom(rewardPaidSql, {
-    rewardContract: REWARD_CONTRACT,
-    rewardTopic: REWARD_PAID_TOPIC,
-    treasuryTopic: `0x000000000000000000000000${TREASURY_ADDRESS.substring(2).toLowerCase()}`,
-    startDate: "2021-05-17"
-  });
-
-  for (const item of data) {
-    result.push({
-      type: "cliff",
-      start: readableToSeconds(item.date),
-      amount: Number(item.amount),
-    });
-  }
-
-  return result;
-};
-
-const treasuryDistributions = async (): Promise<CliffAdapterResult[]> => {
-  const result: CliffAdapterResult[] = [];
-
-  const treasuryExpensesSql = `
+// Curve LP rewards: CVX minted pro-rata for CRV claimed (excluding deployer pre-mint)
+const curveLpRewards = async (): Promise<CliffAdapterResult[]> => {
+  const data = await queryCustom(`
     SELECT
       toStartOfDay(timestamp) AS date,
       SUM(reinterpretAsUInt256(reverse(unhex(substring(data, 3))))) / 1e18 AS amount
     FROM evm_indexer.logs
     PREWHERE short_address = '${CVX.slice(0, 10)}' AND short_topic0 = '${TRANSFER_TOPIC.slice(0, 10)}'
-    WHERE address = {cvxToken:String}
+    WHERE address = '${CVX}'
       AND topic0 = '${TRANSFER_TOPIC}'
-      AND topic1 = {treasuryFromTopic:String}
-      AND topic2 != {excludedToTopic:String}
-      AND timestamp >= toDateTime({startDate:String})
+      AND topic1 = '${ZERO_TOPIC}'
+      AND topic2 != '${DEPLOYER_TOPIC}'
     GROUP BY date
     ORDER BY date ASC
-  `;
+  `, {});
 
-  const data = await queryCustom(treasuryExpensesSql, {
-    cvxToken: CVX,
-    treasuryFromTopic: `0x000000000000000000000000${TREASURY_ADDRESS.substring(2).toLowerCase()}`,
-    excludedToTopic: `0x000000000000000000000000${EXCLUDED_TO_ADDRESS.substring(2).toLowerCase()}`,
-    startDate: "2021-05-17"
-  });
+  return data.map((d: any) => ({
+    type: "cliff" as const,
+    start: readableToSeconds(d.date),
+    amount: Number(d.amount),
+  }));
+};
 
-  for (const item of data) {
-    result.push({
-      type: "cliff",
-      start: readableToSeconds(item.date),
-      amount: Number(item.amount),
-    });
-  }
+// Staking: CVX distributed to cvxCRV stakers via CvxDistribution (excl treasury)
+const stakingRewards = async (): Promise<CliffAdapterResult[]> => {
+  const data = await queryCustom(`
+    SELECT
+      toStartOfDay(timestamp) AS date,
+      SUM(reinterpretAsUInt256(reverse(unhex(substring(data, 3))))) / 1e18 AS amount
+    FROM evm_indexer.logs
+    PREWHERE short_address = '${CVX_DISTRIBUTION.slice(0, 10)}' AND short_topic0 = '${REWARD_PAID_TOPIC.slice(0, 10)}'
+    WHERE address = '${CVX_DISTRIBUTION}'
+      AND topic0 = '${REWARD_PAID_TOPIC}'
+      AND topic1 != '${TREASURY_TOPIC}'
+    GROUP BY date
+    ORDER BY date ASC
+  `, {});
 
-  return result;
+  return data.map((d: any) => ({
+    type: "cliff" as const,
+    start: readableToSeconds(d.date),
+    amount: Number(d.amount),
+  }));
+};
+
+// MasterChef LP farming: CVX distributed from MasterChef (excluding ChefRewardHook)
+const masterchefFarming = async (): Promise<CliffAdapterResult[]> => {
+  const data = await queryCustom(`
+    SELECT
+      toStartOfDay(timestamp) AS date,
+      SUM(reinterpretAsUInt256(reverse(unhex(substring(data, 3))))) / 1e18 AS amount
+    FROM evm_indexer.logs
+    PREWHERE short_address = '${CVX.slice(0, 10)}' AND short_topic0 = '${TRANSFER_TOPIC.slice(0, 10)}'
+    WHERE address = '${CVX}'
+      AND topic0 = '${TRANSFER_TOPIC}'
+      AND topic1 = '${MASTERCHEF_FROM_TOPIC}'
+      AND topic2 != '${CHEF_HOOK_TOPIC}'
+    GROUP BY date
+    ORDER BY date ASC
+  `, {});
+
+  return data.map((d: any) => ({
+    type: "cliff" as const,
+    start: readableToSeconds(d.date),
+    amount: Number(d.amount),
+  }));
+};
+
+
+// Treasury distributions: CVX transfers from treasury (excluding MasterChef recycling)
+const treasuryDistributions = async (): Promise<CliffAdapterResult[]> => {
+  const data = await queryCustom(`
+    SELECT
+      toStartOfDay(timestamp) AS date,
+      SUM(reinterpretAsUInt256(reverse(unhex(substring(data, 3))))) / 1e18 AS amount
+    FROM evm_indexer.logs
+    PREWHERE short_address = '${CVX.slice(0, 10)}' AND short_topic0 = '${TRANSFER_TOPIC.slice(0, 10)}'
+    WHERE address = '${CVX}'
+      AND topic0 = '${TRANSFER_TOPIC}'
+      AND topic1 = '${TREASURY_TOPIC}'
+      AND topic2 != '${MASTERCHEF_FROM_TOPIC}'
+    GROUP BY date
+    ORDER BY date ASC
+  `, {});
+
+  return data.map((d: any) => ({
+    type: "cliff" as const,
+    start: readableToSeconds(d.date),
+    amount: Number(d.amount),
+  }));
+};
+
+const curveLpSection: SectionV2 = {
+  displayName: "Curve LP Rewards",
+  methodology: "CVX minted pro-rata for CRV claimed by Curve LPs on Convex (50% allocation)",
+  isIncentive: true,
+  components: [
+    {
+      id: "curve-lp-mints",
+      name: "Curve LP Reward Mints",
+      methodology: "Tracks CVX minted (Transfer from 0x0) when Curve LPs claim CRV rewards through Convex's Booster.",
+      isIncentive: true,
+      fetch: curveLpRewards,
+      metadata: {
+        contract: CVX,
+        chain: "ethereum",
+        chainId: "1",
+        eventSignature: TRANSFER_TOPIC,
+      },
+    },
+  ],
 };
 
 const stakingSection: SectionV2 = {
@@ -96,7 +144,7 @@ const stakingSection: SectionV2 = {
       isIncentive: false,
       fetch: stakingRewards,
       metadata: {
-        contract: REWARD_CONTRACT,
+        contract: CVX_DISTRIBUTION,
         chain: "ethereum",
         chainId: "1",
         eventSignature: REWARD_PAID_TOPIC,
@@ -107,9 +155,23 @@ const stakingSection: SectionV2 = {
 
 const farmingSection: SectionV2 = {
   displayName: "Farming Incentives",
-  methodology: "Tracks CVX incentives distributed to external parties (LPs, partners, etc.)",
+  methodology: "CVX incentives distributed to LPs and external parties via MasterChef and Treasury",
   isIncentive: true,
   components: [
+    {
+      id: "masterchef-farming",
+      name: "MasterChef LP Farming",
+      methodology: "Tracks CVX transfers from MasterChef to LP farmers, excluding ChefRewardHook which routes to CvxDistribution staking.",
+      isIncentive: true,
+      fetch: masterchefFarming,
+      metadata: {
+        contract: CVX,
+        masterchef: MASTERCHEF,
+        chain: "ethereum",
+        chainId: "1",
+        eventSignature: TRANSFER_TOPIC,
+      },
+    },
     {
       id: "treasury-distributions",
       name: "Treasury Distributions",
@@ -128,48 +190,34 @@ const farmingSection: SectionV2 = {
 };
 
 const convex: ProtocolV2 = {
+  "Curve LP Rewards": curveLpSection,
+  "Staking Rewards": stakingSection,
+  "Farming Incentives": farmingSection,
   Investors: manualLinear(
-      deployTime,
-      deployTime + periodToSeconds.year,
-      3300000,
-  ),
-  Treasury: manualLinear(
-      deployTime,
-      deployTime + periodToSeconds.year,
-      9700000,
+    deployTime,
+    deployTime + periodToSeconds.year,
+    3300000,
   ),
   Team: manualLinear(deployTime, deployTime + periodToSeconds.year, 10000000),
   "veCRV voters": manualCliff(deployTime, 1000000),
   "veCRV holders": manualCliff(deployTime, 1000000),
-  "Liquidity mining": manualLinear(
-      deployTime,
-      deployTime + 4 * periodToSeconds.year,
-      25000000,
-  ),
-  "Curve LP rewards": () =>
-      supply(chain, CVX, deployTime, "convex-finance", 50000000),
-  "Staking Rewards": stakingSection,
-  "Farming Incentives": farmingSection,
   meta: {
     version: 2,
     sources: [
       "https://docs.convexfinance.com/convexfinance/general-information/tokenomics",
+      "https://docs.convexfinance.com/convexfinance/faq/contract-addresses"
     ],
     token: `${chain}:${CVX}`,
     protocolIds: ["319"],
-    incompleteSections: [
-      {
-        key: "Curve LP rewards",
-        allocation: 50000000,
-        lastRecord: () => 1621292400,
-      },
+    total: 100_000_000,
+    notes: [
+      "Curve LP rewards (50%) tracked via CVX mint events from zero address",
     ],
   },
   categories: {
-    noncirculating: ["Treasury"],
     airdrop: ["veCRV voters","veCRV holders"],
     staking: ["Staking Rewards"],
-    farming: ["Farming Incentives"],
+    farming: ["Curve LP Rewards", "Farming Incentives"],
     privateSale: ["Investors"],
     insiders: ["Team"],
   },
