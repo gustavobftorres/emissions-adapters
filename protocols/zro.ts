@@ -9,7 +9,7 @@ const communityTBD: SectionV2 = {
   displayName: "Community Allocation (TBD)",
   isTBD: true,
   methodology:
-    "The remaining 13.3% of Community Allocation and 4% of Tokens Repurchased have no defined unlock schedule.",
+    "The remaining 13.3% of Community Allocation has no defined unlock schedule.",
   components: [
     {
       id: "community-remaining",
@@ -18,14 +18,6 @@ const communityTBD: SectionV2 = {
         "3.8% from Future Initiatives and 9.5% from Ecosystem and Growth with no defined unlock schedule",
       isTBD: true,
       fetch: async () => [manualCliff(start, total * 0.133)],
-    },
-    {
-      id: "tokens-repurchased",
-      name: "Tokens Repurchased",
-      methodology:
-        "4% of supply repurchased and pledged to community with no defined unlock schedule",
-      isTBD: true,
-      fetch: async () => [manualCliff(start, total * 0.04)],
     },
   ],
 };
@@ -42,15 +34,21 @@ const zro: Protocol = {
     start + periodToSeconds.year,
     periodToSeconds.month,
     24,
-    (total * 0.322) / 24,
+    (total * 0.312) / 24,
   ),
+  "Foundation": manualCliff("2025-09-20", 50_000_000),
   "Community Allocation (TBD)": communityTBD,
   meta: {
     version: 2,
     notes: [
-      `The remaining 13.3% of Community Allocation and 4% Tokens Repurchased have no defined unlock schedule and are marked as TBD.`,
+      `The remaining 13.3% of Community Allocation have no defined unlock schedule and are marked as TBD.`,
+      `The LayerZero Foundation bought back 50M tokens from early investors, reducing the original Strategic Partners allocation`,
+      `The original 40M Tokens Repurchased were clawed back in a settlement with the FTX Estate and are now included in the Strategic Partners allocation.`
     ],
-    sources: ["https://info.layerzero.foundation/introducing-zro-d39df554a9b7"],
+    sources: [
+      "https://info.layerzero.foundation/introducing-zro-d39df554a9b7",
+      "https://x.com/LayerZero_Core/status/1970152700735336612",
+    ],
     token: "coingecko:layerzero",
     protocolIds: ["4867"],
   },
@@ -58,7 +56,7 @@ const zro: Protocol = {
     farming: [
       "Community Allocation",
     ],
-    noncirculating: ["Community Allocation (TBD)"],
+    noncirculating: ["Community Allocation (TBD)", "Foundation"],
     insiders: ["Core Contributors", "Strategic Partners"],
   },
 };
