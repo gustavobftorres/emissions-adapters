@@ -6,7 +6,8 @@ import { periodToSeconds } from "../utils/time";
 const start: number = 1587510000;
 const qty: number = 1e9;
 
-const staking = queryDuneSQLCached(`
+function staking() {
+  return queryDuneSQLCached(`
   SELECT date, amount FROM (
     SELECT
      to_unixtime(date) as date,
@@ -17,6 +18,7 @@ const staking = queryDuneSQLCached(`
     ORDER BY date
   ) WHERE amount IS NOT NULL AND date >= START
  `, start, { protocolSlug: "near", allocation: "Staking Rewards"})
+}
 
 
 const near: Protocol = {
