@@ -16,7 +16,7 @@ function staking() {
     WHERE date >= date_add('day', -1, START)
     GROUP BY date
     ORDER BY date
-  ) WHERE amount IS NOT NULL AND date >= START
+  ) WHERE amount IS NOT NULL AND date >= ${start}
  `, start, { protocolSlug: "near", allocation: "Staking Rewards"})
 }
 
