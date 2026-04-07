@@ -1,13 +1,19 @@
 import { LinearAdapterResult, Protocol, CliffAdapterResult } from "../types/adapters";
 import { manualCliff, manualLinear } from "../adapters/manual";
-import { periodToSeconds, normalizeTime } from "../utils/time";
+import { periodToSeconds } from "../utils/time";
 import { queryDune } from "../utils/dune";
 
-const qty = 500e6;
-const mainnet = 1585008000;
-const unlock = mainnet + periodToSeconds.month * 9;
-const purchaser = qty * 0.372;
-const foundersUnlock = 1609977600;
+const mainnet = 1585008000; // March 24, 2020
+const inflationStart = 1612915200; // February 10, 2021
+
+const seed = 79_290_466;
+const founding = 63_151_982;
+const validator = 25_331_653;
+const strategic = 9_175_520;
+const coinlist = 8_000_000;
+const team = 62_495_003;
+const foundation = 51_110_131;
+const community = 190_024_515;
 
 const DUNE_QUERY_ID = "5166082";
 
@@ -29,26 +35,22 @@ const stakingRewardsDune = async (): Promise<{ data: CliffAdapterResult[]; lastT
 // Forecast future staking rewards, starting after last Dune timestamp
 function stakingRewardsForecast(splitTimestamp: number): LinearAdapterResult[] {
   const sections: LinearAdapterResult[] = [];
-  const allocation = qty * 0.339;
+  const initialSupply = 488_579_270;
   const disinflationRate = 0.15;
   let inflationRate = 8;
-  let start = mainnet;
-  let total = qty;
-  let workingQty = 0;
+  let start = inflationStart;
+  let total = initialSupply;
 
-  // Move start to after splitTimestamp
+  // Simulate inflation up to splitTimestamp
   while (start <= splitTimestamp) {
-    if (total > 700e6 || workingQty > allocation) return [];
     const amount = total * (inflationRate / (12 * 100));
-    workingQty += amount;
     total += amount;
     start += periodToSeconds.month;
     inflationRate *= (1 - disinflationRate) ** (1 / 12);
   }
 
-  // Forecast from the day after splitTimestamp
+  // Forecast from after splitTimestamp until terminal rate
   while (inflationRate > 1.5) {
-    if (total > 700e6 || workingQty > allocation) return sections;
     const amount = total * (inflationRate / (12 * 100));
     sections.push({
       type: "linear",
@@ -57,7 +59,6 @@ function stakingRewardsForecast(splitTimestamp: number): LinearAdapterResult[] {
       amount,
       isForecast: true,
     });
-    workingQty += amount;
     total += amount;
     start += periodToSeconds.month;
     inflationRate *= (1 - disinflationRate) ** (1 / 12);
@@ -74,36 +75,51 @@ const stakingRewards = async (): Promise<(CliffAdapterResult | LinearAdapterResu
 };
 
 const solana: Protocol = {
-  "Seed Round": manualCliff(unlock, purchaser * 0.427),
-  "Founding Round": manualCliff(unlock, purchaser * 0.34),
-  "Validator Round": manualCliff(unlock, purchaser * 0.136),
-  "Strategic Round": manualCliff(unlock, purchaser * 0.054),
-  "CoinList Auction": manualCliff(mainnet, purchaser * 0.043),
-  "Grant pool": manualCliff(1596236400, qty * 0.04),
-  Foundation: manualCliff(foundersUnlock, qty * 0.125),
+  "Seed Sale": manualCliff("2021-01-07", seed),
+  "Founding Sale": manualCliff("2021-01-07", founding),
+  "Validator Sale": manualCliff("2021-01-07", validator),
+  "Strategic Sale": manualCliff("2021-01-07", strategic),
+  "CoinList Auction": manualCliff(mainnet, coinlist),
+  Community: [
+    manualLinear("2020-03-01", "2021-01-01", community * 0.13),
+    manualCliff("2021-01-07", community * 0.87),
+  ],
+  Foundation: [
+    manualCliff(mainnet, foundation * 0.005),
+    manualCliff("2021-01-07", foundation * 0.995),
+  ],
+  Team: [
+    manualCliff("2021-01-07", team * 0.5),
+    manualLinear(
+      "2021-01-07",
+      "2023-01-07",
+      team * 0.5,
+    ),
+  ],
   "Staking Rewards": stakingRewards,
-  Founders: manualLinear(
-    foundersUnlock,
-    foundersUnlock + periodToSeconds.year * 2,
-    qty * 0.125,
-  ),
   meta: {
     sources: [
+      "https://www.binance.com/en/research/projects/solana",
+      "https://solana.com/news/solana-foundation-transparency-reports",
       "https://coinlist.co/solana",
       "https://docs.solana.com/inflation/inflation_schedule",
-      "https://medium.com/solana-labs/solana-foundation-transparency-report-1-b267fe8595c0",
       "https://dune.com/queries/5166082",
     ],
     token: "coingecko:solana",
     protocolIds: ["4611"],
-    chain: "solana"
+    chain: "solana",
+    notes: [
+      `Past staking rewards are fetched from Dune, the rest is forecasted after the last Dune data point at an 8% initial rate reducing by 15% per year until 1.5% terminal rate`,
+      `Burns are not modelled`
+    ]
   },
   categories: {
     publicSale: ["CoinList Auction"],
     staking: ["Staking Rewards"],
-    noncirculating: ["Grant pool","Foundation"],
-    privateSale: ["Seed Round","Strategic Round"],
-    insiders: ["Founding Round","Validator Round","Founders"],
+    farming: ["Community"],
+    noncirculating: ["Foundation"],
+    privateSale: ["Seed Sale", "Strategic Sale", "Founding Sale", "Validator Sale"],
+    insiders: ["Team"],
   },
 };
 export default solana;
